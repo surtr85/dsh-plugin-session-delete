@@ -7,7 +7,7 @@ import { apply, name, inject, removeSessionFiles } from "../index.js";
 
 test("plugin metadata", () => {
   assert.equal(name, "dsh-plugin-session-delete");
-  assert.deepEqual(inject, ["webServer", "tools"]);
+  assert.deepEqual(inject, ["webServer"]);
 });
 
 test("removeSessionFiles rejects invalid or malicious sessionIds", async () => {
@@ -69,6 +69,7 @@ test("plugin registers webServer route and agent tool", () => {
       },
     },
     effect: (fn) => fn(),
+    inject: (deps, cb) => cb(mockCtx),
     get: () => null,
   };
 

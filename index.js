@@ -5,7 +5,7 @@ import os from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 
 export const name = "dsh-plugin-session-delete";
-export const inject = ["webServer", "tools"];
+export const inject = ["webServer"];
 
 const SESSION_ID_REGEX = /^session-[0-9a-fA-F-]+$/;
 
@@ -120,50 +120,52 @@ export function apply(ctx) {
   }
 
   // 2. Register Agent Tool `session_delete` if tools service is available
-  if (ctx.tools && typeof defineTool === "function") {
-    ctx.tools.register(
-      defineTool({
-        name: "session_delete",
-        description:
-          "Permanently delete a specified session by its sessionId, completely erasing its data and logs from disk. Use with caution.",
-        parameters: {
-          sessionId: {
-            type: "string",
-            required: true,
-            description: "The unique identifier of the session to delete (e.g. session-3090573d-2edd-4f3f-b4f8-3fb9f6e70f20).",
-          },
-        },
-        output: {
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              ok: { type: "boolean", required: true },
-              sessionId: { type: "string", required: true },
-              deleted: { type: "boolean", required: true },
+  ctx.inject(["tools"], (toolCtx) => {
+    if (toolCtx.tools && typeof defineTool === "function") {
+      toolCtx.tools.register(
+        defineTool({
+          name: "session_delete",
+          description:
+            "Permanently delete a specified session by its sessionId, completely erasing its data and logs from disk. Use with caution.",
+          parameters: {
+            sessionId: {
+              type: "string",
+              required: true,
+              description: "The unique identifier of the session to delete (e.g. session-3090573d-2edd-4f3f-b4f8-3fb9f6e70f20).",
             },
           },
-          render: (_args, value) => [
-            {
-              type: "text",
-              text: `Session "${value.sessionId}" permanently removed from disk (deleted: ${value.deleted}).`,
+          output: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ok: { type: "boolean", required: true },
+                sessionId: { type: "string", required: true },
+                deleted: { type: "boolean", required: true },
+              },
             },
-          ],
-        },
-        async execute(args) {
-          const sessionId = args?.sessionId?.trim();
-          if (!sessionId) {
-            throw new Error("session_delete requires a valid sessionId");
-          }
+            render: (_args, value) => [
+              {
+                type: "text",
+                text: `Session "${value.sessionId}" permanently removed from disk (deleted: ${value.deleted}).`,
+              },
+            ],
+          },
+          async execute(args) {
+            const sessionId = args?.sessionId?.trim();
+            if (!sessionId) {
+              throw new Error("session_delete requires a valid sessionId");
+            }
 
-          const deleted = await removeSessionFiles(sessionId);
-          return {
-            ok: true,
-            sessionId,
-            deleted,
-          };
-        },
-      })
-    );
-  }
+            const deleted = await removeSessionFiles(sessionId);
+            return {
+              ok: true,
+              sessionId,
+              deleted,
+            };
+          },
+        })
+      );
+    }
+  });
 }

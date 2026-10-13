@@ -180,19 +180,23 @@ function definePlugin(require, exports, module) {
     });
   }
 
-  module.exports = {
-    name: "dsh-plugin-session-delete",
-    apply,
-    DeleteSessionMenuItem,
-    DeleteSessionModalOverlay,
-    setPrompt,
-  };
+  exports.name = "dsh-plugin-session-delete";
+  exports.apply = apply;
+  exports.DeleteSessionMenuItem = DeleteSessionMenuItem;
+  exports.DeleteSessionModalOverlay = DeleteSessionModalOverlay;
+  exports.setPrompt = setPrompt;
+  return exports;
 }
 
 if (typeof window !== "undefined" && window.__ModuleLoader__) {
   window.__ModuleLoader__.load({
     id: "dsh-plugin-session-delete",
-    factory: definePlugin,
+    factory: (require) => {
+      var module = { exports: {} };
+      var exports = module.exports;
+      definePlugin(require, exports, module);
+      return module.exports;
+    },
   });
 }
 
