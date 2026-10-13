@@ -1,0 +1,52 @@
+{
+  "name": "dsh-plugin-session-delete",
+  "version": "1.0.0",
+  "description": "Official DeepSeek Harness plugin enabling full UI and agent-level session deletion",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "session-delete",
+    "agent-tool"
+  ],
+  "homepage": "https://github.com/surtr85/dsh-plugin-session-delete#readme",
+  "bugs": {
+    "url": "https://github.com/surtr85/dsh-plugin-session-delete/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/surtr85/dsh-plugin-session-delete.git"
+  },
+  "license": "MIT",
+  "author": "Sajjad <surtr85>",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-delete": "./bin/dsh-delete.mjs"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.1.7"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

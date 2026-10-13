@@ -1,0 +1,3 @@
+- insert:
+    - id: plugin-session-delete
+      name: "dsh-plugin-session-delete"
