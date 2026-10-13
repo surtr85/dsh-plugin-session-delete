@@ -5,7 +5,6 @@ import os from "node:os";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 
 export const name = "dsh-plugin-session-delete";
-export const inject = ["webServer"];
 
 const SESSION_ID_REGEX = /^session-[0-9a-fA-F-]+$/;
 

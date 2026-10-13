@@ -3,11 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { apply, name, inject, removeSessionFiles } from "../index.js";
+import { apply, name, removeSessionFiles } from "../index.js";
 
 test("plugin metadata", () => {
   assert.equal(name, "dsh-plugin-session-delete");
-  assert.deepEqual(inject, ["webServer"]);
 });
 
 test("removeSessionFiles rejects invalid or malicious sessionIds", async () => {

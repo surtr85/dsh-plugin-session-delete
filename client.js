@@ -5,186 +5,110 @@
 
 function definePlugin(require, exports, module) {
   const React = require("react");
-  const { jsx, jsxs, Fragment } = require("react/jsx-runtime");
-  const primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-
-  const MenuItemButton = primitives.MenuItemButton;
-  const Modal = primitives.Modal;
-  const Button = primitives.Button;
-  const IconTrashOutlineRegular = primitives.IconTrashOutlineRegular;
-
-  // React state observer for the delete confirmation modal
-  const promptListeners = new Set();
-  let currentPrompt = null;
-
-  function setPrompt(val) {
-    currentPrompt = val;
-    for (const listener of promptListeners) {
-      try {
-        listener(currentPrompt);
-      } catch (err) {
-        console.error("dsh-plugin-session-delete: listener error", err);
-      }
-    }
-  }
-
-  function useDeletePrompt() {
-    const [prompt, set] = React.useState(currentPrompt);
-    React.useEffect(() => {
-      promptListeners.add(set);
-      return () => promptListeners.delete(set);
-    }, []);
-    return prompt;
-  }
-
-  /**
-   * Menu Item row (Order 500 - placed after Archive session).
-   */
-  function DeleteSessionMenuItem({ sessionId, displayTitle, useMenuOpenState }) {
-    const [, setMenuOpen] = typeof useMenuOpenState === "function" ? useMenuOpenState() : [false, () => {}];
-
-    const handleSelect = React.useCallback(() => {
-      if (typeof setMenuOpen === "function") {
-        setMenuOpen(false);
-      }
-      setPrompt({
-        sessionId,
-        displayTitle: displayTitle || "Untitled Session",
-      });
-    }, [sessionId, displayTitle, setMenuOpen]);
-
-    const icon = IconTrashOutlineRegular
-      ? jsx(IconTrashOutlineRegular, { size: 14 })
-      : jsx("span", { style: { marginRight: 6 }, children: "🗑" });
-
-    return jsx(MenuItemButton, {
-      danger: true,
-      separatorBefore: true,
-      icon,
-      onSelect: handleSelect,
-      children: "Delete session",
-    });
-  }
-
-  /**
-   * Confirmation Modal Overlay.
-   */
-  function DeleteSessionModalOverlay() {
-    const prompt = useDeletePrompt();
-    const [deleting, setDeleting] = React.useState(false);
-    const [error, setError] = React.useState(null);
-
-    if (!prompt) return null;
-
-    const close = () => {
-      if (deleting) return;
-      setError(null);
-      setPrompt(null);
-    };
-
-    const confirm = async () => {
-      setDeleting(true);
-      setError(null);
-      try {
-        const response = await fetch("/api/session/delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId: prompt.sessionId }),
-        });
-
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.error || `HTTP ${response.status}: Failed to delete session`);
-        }
-
-        // Check if currently active session was deleted
-        const isCurrentSession = window.location.href.includes(prompt.sessionId);
-
-        setPrompt(null);
-
-        // If viewing deleted session, navigate to home/new session
-        if (isCurrentSession) {
-          const newSessionBtn = document.querySelector('button[aria-label*="New session"], button[aria-label*="New Chat"], [data-testid="new-chat-button"]');
-          if (newSessionBtn) {
-            newSessionBtn.click();
-          } else {
-            window.location.hash = "";
-            window.location.reload();
-          }
-        } else {
-          // Trigger view refresh to drop removed session
-          window.location.reload();
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setDeleting(false);
-      }
-    };
-
-    return jsx(Modal, {
-      open: true,
-      onClose: close,
-      title: "Delete session",
-      description: `Permanently delete "${prompt.displayTitle}"? This will erase all message history and session data from disk. This action cannot be undone.`,
-      footer: jsxs(Fragment, {
-        children: [
-          jsx(Button, {
-            variant: "outline",
-            disabled: deleting,
-            onClick: close,
-            children: "Cancel",
-          }),
-          jsx(Button, {
-            variant: "outline",
-            danger: true,
-            disabled: deleting,
-            onClick: confirm,
-            children: deleting ? "Deleting..." : "Delete permanently",
-          }),
-        ],
-      }),
-      children: error
-        ? jsx("div", {
-            style: { color: "var(--dsw-danger, #ef4444)", marginTop: 12, fontSize: 13 },
-            children: error,
-          })
-        : null,
-    });
-  }
+  let primitives = null;
+  try {
+    primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+  } catch {}
 
   function apply(ctx) {
     if (!ctx.slots) return;
 
-    // 1. Inject Menu item into Session context menu
-    ctx.slots.inject("sidebar.workspaces.session.menu.item", function* () {
-      yield ctx.slots.register(
+    ctx.slots.inject("sidebar.workspaces.session.menu.item", () => {
+      return ctx.slots.register(
         {
           name: "sidebar.workspaces.session.menu.item",
           id: "delete-session",
           order: 500,
         },
-        DeleteSessionMenuItem
-      );
-    });
+        ({ sessionId, displayTitle, useMenuOpenState }) => {
+          const [, setMenuOpen] = typeof useMenuOpenState === "function" ? useMenuOpenState() : [false, () => {}];
 
-    // 2. Inject Modal Overlay into Shell overlays
-    ctx.slots.inject("shell.overlay", function* () {
-      yield ctx.slots.register(
-        {
-          name: "shell.overlay",
-          id: "workspace.session-delete-overlay",
-        },
-        DeleteSessionModalOverlay
+          const handleDelete = async () => {
+            if (typeof setMenuOpen === "function") setMenuOpen(false);
+            const title = displayTitle || "this session";
+            const confirmed = window.confirm(
+              `Permanently delete "${title}"?\n\nThis will erase all messages and session data from disk. This cannot be undone.`
+            );
+            if (!confirmed) return;
+
+            try {
+              const res = await fetch("/api/session/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId }),
+              });
+              const data = await res.json();
+              if (!data.ok) {
+                alert(data.error || "Failed to delete session");
+                return;
+              }
+
+              const isCurrent = window.location.href.includes(sessionId);
+              if (isCurrent) {
+                const newChatBtn = document.querySelector(
+                  'button[aria-label*="New session"], button[aria-label*="New Chat"], [data-testid="new-chat-button"]'
+                );
+                if (newChatBtn) {
+                  newChatBtn.click();
+                } else {
+                  window.location.hash = "";
+                  window.location.reload();
+                }
+              } else {
+                window.location.reload();
+              }
+            } catch (err) {
+              alert("Failed to delete session: " + err.message);
+            }
+          };
+
+          const icon = primitives?.IconTrashOutlineRegular
+            ? React.createElement(primitives.IconTrashOutlineRegular, { size: 14 })
+            : "🗑 ";
+
+          if (primitives?.MenuItemButton) {
+            return React.createElement(
+              primitives.MenuItemButton,
+              {
+                danger: true,
+                separatorBefore: true,
+                icon,
+                onSelect: handleDelete,
+              },
+              "Delete session"
+            );
+          }
+
+          return React.createElement(
+            "button",
+            {
+              type: "button",
+              role: "menuitem",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                width: "100%",
+                padding: "8px 12px",
+                color: "#ef4444",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                textAlign: "left",
+              },
+              onClick: handleDelete,
+            },
+            icon,
+            "Delete session"
+          );
+        }
       );
     });
   }
 
   exports.name = "dsh-plugin-session-delete";
+  exports.inject = ["slots"];
   exports.apply = apply;
-  exports.DeleteSessionMenuItem = DeleteSessionMenuItem;
-  exports.DeleteSessionModalOverlay = DeleteSessionModalOverlay;
-  exports.setPrompt = setPrompt;
   return exports;
 }
 
