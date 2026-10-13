@@ -42,6 +42,19 @@ export async function removeSessionFiles(sessionId) {
     await fs.rm(recoveryCandidate, { recursive: true, force: true });
   }
 
+  // Clear projection caches so UI sidebar never shows orphan ghost sessions
+  const projCacheDirs = [
+    path.join(dshHome, "storages", "session_projcache", "sessions"),
+    path.join(dshHome, "storages", "session_projcache_archive_manager_v2", "sessions"),
+  ];
+  for (const cacheDir of projCacheDirs) {
+    const cacheFile = path.join(cacheDir, `${sessionId}.json`);
+    if (fsSync.existsSync(cacheFile)) {
+      await fs.rm(cacheFile, { recursive: true, force: true });
+      foundAndDeleted = true;
+    }
+  }
+
   return foundAndDeleted;
 }
 

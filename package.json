@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-session-delete",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Official DeepSeek Harness plugin enabling full UI and agent-level session deletion",
   "keywords": [
     "dsh",
