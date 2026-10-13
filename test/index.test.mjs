@@ -52,14 +52,14 @@ test("removeSessionFiles removes existing session directory", async () => {
 });
 
 test("plugin registers webServer route and agent tool", () => {
-  let registeredRoute = null;
+  const registeredRoutes = [];
   let registeredTool = null;
 
   const mockCtx = {
     logger: { info: () => {}, warn: () => {} },
     webServer: {
       register: (route) => {
-        registeredRoute = route;
+        registeredRoutes.push(route);
       },
     },
     tools: {
@@ -74,9 +74,9 @@ test("plugin registers webServer route and agent tool", () => {
 
   apply(mockCtx);
 
-  assert.ok(registeredRoute, "WebServer route must be registered");
-  assert.equal(registeredRoute.path, "/dsh-ext/session-delete");
-  assert.equal(registeredRoute.kind, "exact");
+  assert.ok(registeredRoutes.length >= 2, "WebServer routes must be registered");
+  assert.ok(registeredRoutes.some((r) => r.path === "/dsh-ext/session-delete" && r.kind === "exact"));
+  assert.ok(registeredRoutes.some((r) => r.path === "/dsh-ext/session-bulk-delete" && r.kind === "exact"));
 
   assert.ok(registeredTool, "Agent tool must be registered");
   assert.equal(registeredTool.name, "session_delete");

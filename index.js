@@ -47,6 +47,7 @@ export async function removeSessionFiles(sessionId) {
     path.join(dshHome, "storages", "session_projcache", "sessions"),
     path.join(dshHome, "storages", "session_projcache_archive_manager_v2", "sessions"),
   ];
+
   for (const cacheDir of projCacheDirs) {
     const cacheFile = path.join(cacheDir, `${sessionId}.json`);
     if (fsSync.existsSync(cacheFile)) {
@@ -59,21 +60,92 @@ export async function removeSessionFiles(sessionId) {
 }
 
 /**
+ * Evict session from runtime state (agents, sessions, workspaceRegistry) and emit WebSocket broadcast.
+ *
+ * @param {import("@deepseek-ai/cordis").Context} ctx
+ * @param {string} sessionId
+ */
+export async function purgeSessionFromRuntime(ctx, sessionId) {
+  if (!SESSION_ID_REGEX.test(sessionId)) return;
+
+  // 1. Dispose live agent if running
+  try {
+    const agents = ctx.get("agents");
+    const liveAgent = agents?.get?.(sessionId);
+    if (liveAgent && typeof liveAgent.dispose === "function") {
+      await liveAgent.dispose().catch(() => {});
+    }
+  } catch (err) {
+    ctx.logger?.warn?.(`[session-manager] agent disposal error for ${sessionId}: ${err.message}`);
+  }
+
+  // 2. Detach live session if loaded in memory
+  try {
+    const sessions = ctx.get("sessions");
+    const liveSession = sessions?.get?.(sessionId);
+    if (liveSession && typeof liveSession.dispose === "function") {
+      await liveSession.dispose().catch(() => {});
+    }
+  } catch (err) {
+    ctx.logger?.warn?.(`[session-manager] live session disposal error for ${sessionId}: ${err.message}`);
+  }
+
+  // 3. Clean up workspaceRegistry memberships, pin, and archive lists
+  try {
+    const wsRegistry = ctx.get("workspaceRegistry");
+    if (wsRegistry) {
+      if (typeof wsRegistry.unarchiveSession === "function") {
+        await wsRegistry.unarchiveSession(sessionId).catch(() => {});
+      }
+      if (typeof wsRegistry.unpinSession === "function") {
+        await wsRegistry.unpinSession(sessionId).catch(() => {});
+      }
+      const table = wsRegistry.table || (typeof wsRegistry.requireTable === "function" ? wsRegistry.requireTable() : null);
+      if (table) {
+        for (const [wsId, record] of table.entries()) {
+          if (record.sessionIds && record.sessionIds.includes(sessionId)) {
+            const updated = record.sessionIds.filter((id) => id !== sessionId);
+            await table.set(wsId, {
+              ...record,
+              sessionIds: updated,
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {});
+          }
+        }
+      }
+      wsRegistry.headers?.delete?.(sessionId);
+      wsRegistry.sessionPaths?.delete?.(sessionId);
+      wsRegistry.invalidSessionPaths?.delete?.(sessionId);
+    }
+  } catch (err) {
+    ctx.logger?.warn?.(`[session-manager] workspace registry cleanup error for ${sessionId}: ${err.message}`);
+  }
+
+  // 4. Emit Cordis events that propagate through dsh-api-remotes to WebSockets
+  try {
+    ctx.emit("api-session/removed", sessionId);
+    ctx.emit("session/disposed", { id: sessionId, header: { id: sessionId } });
+    ctx.emit("workspace/orderChanged");
+  } catch (err) {
+    ctx.logger?.warn?.(`[session-manager] event broadcast error for ${sessionId}: ${err.message}`);
+  }
+}
+
+/**
  * DeepSeek Harness Host Plugin entry point.
- * Mounts the HTTP endpoint `/api/session/delete` and agent tool `session_delete`.
  *
  * @param {import("@deepseek-ai/cordis").Context} ctx
  */
 export function apply(ctx) {
-  ctx.logger?.info?.("dsh-plugin-session-delete: mounting session delete engine");
+  ctx.logger?.info?.("dsh-plugin-session-delete: mounting session management & live delete engine");
 
-  // 1. Register WebServer endpoint for UI context menu and RPC calls
+  // 1. Register WebServer endpoints
   ctx.inject(["webServer"], (webCtx) => {
-    const route = {
+    // Single delete endpoint
+    const deleteRoute = {
       kind: "exact",
       path: "/dsh-ext/session-delete",
       handler: async (req, res) => {
-        // Authenticate request if Connection service is available
         const connection = webCtx.get("connection");
         if (connection && typeof connection.admit === "function") {
           const admission = connection.admit(req);
@@ -106,16 +178,10 @@ export function apply(ctx) {
               return;
             }
 
-            // Close active agent if running in memory
-            try {
-              const liveAgent = webCtx.get("agents")?.get?.(sessionId);
-              if (liveAgent && typeof liveAgent.dispose === "function") {
-                await liveAgent.dispose();
-              }
-            } catch (err) {
-              webCtx.logger?.warn?.(`dsh-plugin-session-delete: failed to dispose live agent: ${err.message}`);
-            }
+            // Purge runtime state & broadcast WebSocket event FIRST
+            await purgeSessionFromRuntime(webCtx, sessionId);
 
+            // Remove files from disk
             const deleted = await removeSessionFiles(sessionId);
 
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -128,56 +194,116 @@ export function apply(ctx) {
       },
     };
 
-    webCtx.effect(() => webCtx.webServer.register(route), "dsh-plugin-session-delete: /dsh-ext/session-delete");
+    // Bulk delete endpoint
+    const bulkDeleteRoute = {
+      kind: "exact",
+      path: "/dsh-ext/session-bulk-delete",
+      handler: async (req, res) => {
+        const connection = webCtx.get("connection");
+        if (connection && typeof connection.admit === "function") {
+          const admission = connection.admit(req);
+          if ("rejection" in admission) {
+            res.writeHead(admission.rejection, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+            return;
+          }
+        }
+
+        if (req.method !== "POST") {
+          res.writeHead(405, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "method not allowed" }));
+          return;
+        }
+
+        let bodyRaw = "";
+        req.on("data", (chunk) => {
+          bodyRaw += chunk;
+        });
+
+        req.on("end", async () => {
+          try {
+            const body = JSON.parse(bodyRaw || "{}");
+            const sessionIds = Array.isArray(body.sessionIds) ? body.sessionIds : [];
+
+            if (sessionIds.length === 0) {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: false, error: "sessionIds array is required" }));
+              return;
+            }
+
+            const results = [];
+            for (const id of sessionIds) {
+              try {
+                await purgeSessionFromRuntime(webCtx, id);
+                const deleted = await removeSessionFiles(id);
+                results.push({ id, ok: true, deleted });
+              } catch (e) {
+                results.push({ id, ok: false, error: e.message });
+              }
+            }
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, results }));
+          } catch (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: err.message }));
+          }
+        });
+      },
+    };
+
+    webCtx.effect(() => webCtx.webServer.register(deleteRoute), "dsh-plugin-session-delete: /dsh-ext/session-delete");
+    webCtx.effect(() => webCtx.webServer.register(bulkDeleteRoute), "dsh-plugin-session-delete: /dsh-ext/session-bulk-delete");
   });
 
   // 2. Register Agent Tool `session_delete` if tools service is available
   ctx.inject(["tools"], (toolCtx) => {
     if (toolCtx.tools && typeof defineTool === "function") {
-      toolCtx.tools.register(
-        defineTool({
-          name: "session_delete",
-          description:
-            "Permanently delete a specified session by its sessionId, completely erasing its data and logs from disk. Use with caution.",
-          parameters: {
-            sessionId: {
-              type: "string",
-              required: true,
-              description: "The unique identifier of the session to delete (e.g. session-3090573d-2edd-4f3f-b4f8-3fb9f6e70f20).",
+      const sessionDeleteTool = defineTool({
+        name: "session_delete",
+        description:
+          "Permanently delete a specified session by its sessionId, completely erasing its data and logs from disk and runtime memory. Use with caution.",
+        parameters: {
+          sessionId: {
+            type: "string",
+            required: true,
+            description: "The unique identifier of the session to delete (e.g. session-3090573d-2edd-4f3f-b4f8-3fb9f6e70f20).",
+          },
+        },
+        output: {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              ok: { type: "boolean", required: true },
+              sessionId: { type: "string", required: true },
+              deleted: { type: "boolean", required: true },
             },
           },
-          output: {
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                ok: { type: "boolean", required: true },
-                sessionId: { type: "string", required: true },
-                deleted: { type: "boolean", required: true },
-              },
+          render: (_args, value) => [
+            {
+              type: "text",
+              text: `Session "${value.sessionId}" permanently removed from disk and runtime (deleted: ${value.deleted}).`,
             },
-            render: (_args, value) => [
-              {
-                type: "text",
-                text: `Session "${value.sessionId}" permanently removed from disk (deleted: ${value.deleted}).`,
-              },
-            ],
-          },
-          async execute(args) {
-            const sessionId = args?.sessionId?.trim();
-            if (!sessionId) {
-              throw new Error("session_delete requires a valid sessionId");
-            }
+          ],
+        },
+        async execute(args) {
+          const sessionId = args?.sessionId?.trim();
+          if (!sessionId) {
+            throw new Error("session_delete requires a valid sessionId");
+          }
 
-            const deleted = await removeSessionFiles(sessionId);
-            return {
-              ok: true,
-              sessionId,
-              deleted,
-            };
-          },
-        })
-      );
+          await purgeSessionFromRuntime(toolCtx, sessionId);
+          const deleted = await removeSessionFiles(sessionId);
+          return {
+            ok: true,
+            sessionId,
+            deleted,
+          };
+        },
+      });
+
+      toolCtx.effect(() => toolCtx.tools.register(sessionDeleteTool), "dsh-plugin-session-delete: session_delete tool");
     }
   });
 }

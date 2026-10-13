@@ -1,13 +1,16 @@
 {
   "name": "dsh-plugin-session-delete",
-  "version": "1.0.3",
-  "description": "Official DeepSeek Harness plugin enabling full UI and agent-level session deletion",
+  "version": "1.1.0",
+  "description": "DeepSeek Harness plugin providing comprehensive Session Manager with live zero-lock deletion, bulk actions, workspace hierarchy, and archive vault",
   "keywords": [
     "dsh",
     "deepseek-harness",
     "dsh-plugin",
     "cordis",
     "session-delete",
+    "session-manager",
+    "workspaces",
+    "bulk-actions",
     "agent-tool"
   ],
   "homepage": "https://github.com/surtr85/dsh-plugin-session-delete#readme",
