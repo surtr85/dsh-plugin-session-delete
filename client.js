@@ -8,7 +8,11 @@
  * 4. Sidebar context menu integration with live update (no reload needed)
  */
 
-function definePlugin(require, exports, module) {
+window.__ModuleLoader__.load({
+  id: "dsh-plugin-session-delete",
+  factory: (require) => {
+    var module = { exports: {} };
+    var exports = module.exports;
   const React = require("react");
   const { useState, useEffect, useMemo, useCallback } = React;
 
@@ -1396,6 +1400,5 @@ function definePlugin(require, exports, module) {
     inject: ["slots"],
     apply,
   };
-}
-
-module.exports = definePlugin(require, exports, module);
+  }
+});
