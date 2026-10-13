@@ -60,7 +60,7 @@ const body = encodeBase64Url(Buffer.from(JSON.stringify(payload), "utf8"));
 const sig = encodeBase64Url(crypto.createHmac("sha256", secret).update(body).digest());
 const cookieHeader = `${cookieName}=v1.${body}.${sig}`;
 
-const res = await fetch(`${webUrl.origin}/api/session/delete`, {
+const res = await fetch(`${webUrl.origin}/dsh-ext/session-delete`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",

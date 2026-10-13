@@ -75,7 +75,7 @@ test("plugin registers webServer route and agent tool", () => {
   apply(mockCtx);
 
   assert.ok(registeredRoute, "WebServer route must be registered");
-  assert.equal(registeredRoute.path, "/api/session/delete");
+  assert.equal(registeredRoute.path, "/dsh-ext/session-delete");
   assert.equal(registeredRoute.kind, "exact");
 
   assert.ok(registeredTool, "Agent tool must be registered");

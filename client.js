@@ -32,13 +32,19 @@ function definePlugin(require, exports, module) {
             if (!confirmed) return;
 
             try {
-              const res = await fetch("/api/session/delete", {
+              const res = await fetch("/dsh-ext/session-delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ sessionId }),
               });
-              const data = await res.json();
-              if (!data.ok) {
+              const text = await res.text();
+              let data;
+              try {
+                data = JSON.parse(text);
+              } catch {
+                throw new Error(text || "Non-JSON response");
+              }
+              if (!res.ok || !data.ok) {
                 alert(data.error || "Failed to delete session");
                 return;
               }

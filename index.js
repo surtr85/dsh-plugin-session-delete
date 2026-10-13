@@ -55,13 +55,13 @@ export function apply(ctx) {
   ctx.logger?.info?.("dsh-plugin-session-delete: mounting session delete engine");
 
   // 1. Register WebServer endpoint for UI context menu and RPC calls
-  if (ctx.webServer) {
+  ctx.inject(["webServer"], (webCtx) => {
     const route = {
       kind: "exact",
-      path: "/api/session/delete",
+      path: "/dsh-ext/session-delete",
       handler: async (req, res) => {
         // Authenticate request if Connection service is available
-        const connection = ctx.get("connection");
+        const connection = webCtx.get("connection");
         if (connection && typeof connection.admit === "function") {
           const admission = connection.admit(req);
           if ("rejection" in admission) {
@@ -95,12 +95,12 @@ export function apply(ctx) {
 
             // Close active agent if running in memory
             try {
-              const liveAgent = ctx.get("agents")?.get?.(sessionId);
+              const liveAgent = webCtx.get("agents")?.get?.(sessionId);
               if (liveAgent && typeof liveAgent.dispose === "function") {
                 await liveAgent.dispose();
               }
             } catch (err) {
-              ctx.logger?.warn?.(`dsh-plugin-session-delete: failed to dispose live agent: ${err.message}`);
+              webCtx.logger?.warn?.(`dsh-plugin-session-delete: failed to dispose live agent: ${err.message}`);
             }
 
             const deleted = await removeSessionFiles(sessionId);
@@ -115,8 +115,8 @@ export function apply(ctx) {
       },
     };
 
-    ctx.effect(() => ctx.webServer.register(route), "dsh-plugin-session-delete: /api/session/delete");
-  }
+    webCtx.effect(() => webCtx.webServer.register(route), "dsh-plugin-session-delete: /dsh-ext/session-delete");
+  });
 
   // 2. Register Agent Tool `session_delete` if tools service is available
   ctx.inject(["tools"], (toolCtx) => {
