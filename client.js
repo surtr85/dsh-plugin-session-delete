@@ -1417,10 +1417,9 @@ window.__ModuleLoader__.load({
     });
   }
 
-  return {
-    name: "dsh-plugin-session-delete",
-    inject: ["slots"],
-    apply,
-  };
+  exports.name = "dsh-plugin-session-delete";
+  exports.inject = ["slots"];
+  exports.apply = apply;
+  return module.exports;
   }
 });
