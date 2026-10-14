@@ -15,19 +15,98 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
   const React = require("react");
   const { useState, useEffect, useMemo, useCallback } = React;
-
-  let primitives = {};
-  try {
-    primitives = require("@deepseek-ai/dsh-client-ui-primitives") || {};
-  } catch {}
-
   const e = React.createElement;
 
-  // Icons helper fallback if primitive not available
+  class ErrorBoundary extends React.Component {
+    constructor(props) {
+      super(props);
+      this.state = { error: null };
+    }
+    static getDerivedStateFromError(error) {
+      return { error };
+    }
+    componentDidCatch(error, info) {
+      console.error("[SessionManager] Caught error:", error, info);
+    }
+    render() {
+      if (this.state.error) {
+        return e(
+          "div",
+          {
+            style: {
+              padding: "24px",
+              color: "#f87171",
+              backgroundColor: "rgba(239, 68, 68, 0.1)",
+              borderRadius: "8px",
+              margin: "16px",
+              fontFamily: "system-ui, sans-serif",
+            },
+          },
+          e("h3", { style: { margin: "0 0 8px", fontSize: "16px" } }, "Session Manager Error"),
+          e("p", { style: { margin: "0 0 12px", fontSize: "13px", color: "#e5e5e5" } }, String(this.state.error.message || this.state.error)),
+          e("button", {
+            type: "button",
+            onClick: () => this.setState({ error: null }),
+            style: {
+              padding: "6px 12px",
+              backgroundColor: "#2563eb",
+              color: "#fff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+            },
+          }, "Retry")
+        );
+      }
+      return this.props.children;
+    }
+  }
+
+  // Pure SVG icon helper (zero external module dependencies)
   function renderIcon(name, props = {}) {
-    const Component = primitives[name];
-    if (Component) {
-      return e(Component, { size: props.size || 16, className: props.className });
+    const size = props.size || 14;
+    const style = { width: size, height: size, verticalAlign: "middle", display: "inline-block" };
+    if (name.includes("Trash")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+        e("polyline", { points: "3 6 5 6 21 6" }),
+        e("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" })
+      );
+    }
+    if (name.includes("PinOff") || name.includes("PinOutline")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+        e("path", { d: "M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" })
+      );
+    }
+    if (name.includes("Pin")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "currentColor", stroke: "currentColor", strokeWidth: 1 },
+        e("path", { d: "M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" })
+      );
+    }
+    if (name.includes("Archive")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+        e("polyline", { points: "21 8 21 21 3 21 3 8" }),
+        e("rect", { x: "1", y: "3", width: "22", height: "5" }),
+        e("line", { x1: "10", y1: "12", x2: "14", y2: "12" })
+      );
+    }
+    if (name.includes("Edit")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+        e("path", { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+        e("path", { d: "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" })
+      );
+    }
+    if (name.includes("Branch")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+        e("line", { x1: "6", y1: "3", x2: "6", y2: "15" }),
+        e("circle", { cx: "18", cy: "6", r: "3" }),
+        e("circle", { cx: "6", cy: "18", r: "3" }),
+        e("path", { d: "M18 9a9 9 0 0 1-9 9" })
+      );
+    }
+    if (name.includes("Browse") || name.includes("Folder")) {
+      return e("svg", { style, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2 },
+        e("path", { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" })
+      );
     }
     return null;
   }
@@ -141,18 +220,28 @@ window.__ModuleLoader__.load({
     const [renameModal, setRenameModal] = useState(null); // { type: 'session' | 'workspace', id, currentTitle }
     const [deleteModal, setDeleteModal] = useState(null); // { type: 'single' | 'bulk', ids: [], titles: [] }
 
+    const [loading, setLoading] = useState(true);
     const [fallbackSessions, setFallbackSessions] = useState([]);
 
     // Fetch sessions directly from server endpoint
     useEffect(() => {
+      let active = true;
       fetch("/dsh-ext/sessions")
         .then((r) => r.json())
         .then((data) => {
-          if (data && data.ok && Array.isArray(data.sessions)) {
+          if (active && data && data.ok && Array.isArray(data.sessions)) {
             setFallbackSessions(data.sessions);
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("[SessionManager] Fetch sessions error:", err);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+      return () => {
+        active = false;
+      };
     }, [tick]);
 
     // Subscribe to sessions and workspaces changes
@@ -983,7 +1072,11 @@ window.__ModuleLoader__.load({
           },
         },
         // Active view rendering
-        activeTab === "pinned"
+        loading && allSessions.length === 0
+          ? e("div", { style: emptyStateStyle }, "Loading sessions from disk & runtime…")
+          : allSessions.length === 0
+          ? e("div", { style: emptyStateStyle }, "No active or saved sessions found.")
+          : activeTab === "pinned"
           ? e(
               "div",
               null,
@@ -1011,134 +1104,137 @@ window.__ModuleLoader__.load({
             e(
               "div",
               null,
-              // Workspaces Accordions
-              workspaceGroups.map((ws) => {
-                const isCollapsed = collapsedWorkspaces.has(ws.id);
-                return e(
-                  "div",
-                  {
-                    key: ws.id,
-                    style: {
-                      borderBottom: "1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.1))",
-                    },
-                  },
-                  // Workspace Header Row
-                  e(
+              // If there are workspaces, render them with accordions
+              workspaceGroups.length > 0 &&
+                workspaceGroups.map((ws) => {
+                  const isCollapsed = collapsedWorkspaces.has(ws.id);
+                  return e(
                     "div",
                     {
+                      key: ws.id,
                       style: {
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "10px 14px",
-                        backgroundColor: "var(--color-bg-base, rgba(255, 255, 255, 0.03))",
-                        cursor: "pointer",
-                        userSelect: "none",
+                        borderBottom: "1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.1))",
                       },
-                      onClick: () => toggleWorkspaceCollapse(ws.id),
                     },
-                    e(
-                      "div",
-                      { style: { display: "flex", alignItems: "center", gap: "8px" } },
-                      e(
-                        "span",
-                        { style: { color: "#9ca3af", fontSize: "11px" } },
-                        isCollapsed ? "▶" : "▼"
-                      ),
-                      renderIcon("IconBrowseOutlineMedium", { size: 15 }) || "📁",
-                      e(
-                        "span",
-                        {
-                          style: {
-                            fontWeight: 600,
-                            fontSize: "13px",
-                            color: "var(--color-text-primary, #ffffff)",
-                          },
-                        },
-                        ws.title
-                      ),
-                      e(
-                        "span",
-                        {
-                          style: {
-                            fontSize: "11px",
-                            padding: "1px 6px",
-                            borderRadius: "10px",
-                            backgroundColor: "rgba(255, 255, 255, 0.08)",
-                            color: "#9ca3af",
-                          },
-                        },
-                        `${ws.sessions.length} sessions`
-                      )
-                    ),
-                    // Workspace Action Buttons
+                    // Workspace Header Row
                     e(
                       "div",
                       {
-                        style: { display: "flex", alignItems: "center", gap: "6px" },
-                        onClick: (ev) => ev.stopPropagation(),
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "10px 14px",
+                          backgroundColor: "var(--color-bg-base, rgba(255, 255, 255, 0.03))",
+                          cursor: "pointer",
+                          userSelect: "none",
+                        },
+                        onClick: () => toggleWorkspaceCollapse(ws.id),
                       },
                       e(
-                        "button",
-                        {
-                          type: "button",
-                          title: "Rename workspace",
-                          onClick: () =>
-                            setRenameModal({
-                              type: "workspace",
-                              id: ws.id,
-                              title: ws.title,
-                            }),
-                          style: actionButtonStyle,
-                        },
-                        "Rename"
-                      ),
-                      e(
-                        "button",
-                        {
-                          type: "button",
-                          title: "Ungroup workspace (keeps sessions)",
-                          onClick: () => handleDeleteWorkspace(ws.id, ws.title),
-                          style: { ...actionButtonStyle, color: "#f87171" },
-                        },
-                        "Ungroup"
-                      )
-                    )
-                  ),
-                  // Workspace Session Rows
-                  !isCollapsed &&
-                    (ws.sessions.length === 0
-                      ? e(
-                          "div",
-                          { style: { padding: "10px 16px", fontSize: "12px", color: "#737373" } },
-                          "No matching sessions in this workspace."
+                        "div",
+                        { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                        e(
+                          "span",
+                          { style: { color: "#9ca3af", fontSize: "11px" } },
+                          isCollapsed ? "▶" : "▼"
+                        ),
+                        renderIcon("IconBrowseOutlineMedium", { size: 15 }) || "📁",
+                        e(
+                          "span",
+                          {
+                            style: {
+                              fontWeight: 600,
+                              fontSize: "13px",
+                              color: "var(--color-text-primary, #ffffff)",
+                            },
+                          },
+                          ws.title
+                        ),
+                        e(
+                          "span",
+                          {
+                            style: {
+                              fontSize: "11px",
+                              padding: "1px 6px",
+                              borderRadius: "10px",
+                              backgroundColor: "rgba(255, 255, 255, 0.08)",
+                              color: "#9ca3af",
+                            },
+                          },
+                          `${ws.sessions.length} sessions`
                         )
-                      : ws.sessions.map(renderSessionRow))
-                );
-              }),
+                      ),
+                      // Workspace Action Buttons
+                      e(
+                        "div",
+                        {
+                          style: { display: "flex", alignItems: "center", gap: "6px" },
+                          onClick: (ev) => ev.stopPropagation(),
+                        },
+                        e(
+                          "button",
+                          {
+                            type: "button",
+                            title: "Rename workspace",
+                            onClick: () =>
+                              setRenameModal({
+                                type: "workspace",
+                                id: ws.id,
+                                title: ws.title,
+                              }),
+                            style: actionButtonStyle,
+                          },
+                          "Rename"
+                        ),
+                        e(
+                          "button",
+                          {
+                            type: "button",
+                            title: "Ungroup workspace (keeps sessions)",
+                            onClick: () => handleDeleteWorkspace(ws.id, ws.title),
+                            style: { ...actionButtonStyle, color: "#f87171" },
+                          },
+                          "Ungroup"
+                        )
+                      )
+                    ),
+                    // Workspace Session Rows
+                    !isCollapsed &&
+                      (ws.sessions.length === 0
+                        ? e(
+                            "div",
+                            { style: { padding: "10px 16px", fontSize: "12px", color: "#737373" } },
+                            "No matching sessions in this workspace."
+                          )
+                        : ws.sessions.map(renderSessionRow))
+                  );
+                }),
 
-              // Ungrouped Section
-              ungroupedSessions.length > 0 &&
-                e(
-                  "div",
-                  { key: "ungrouped-section" },
+              // If there are no workspaces, render all sessions directly
+              workspaceGroups.length === 0
+                ? filteredSessions.map(renderSessionRow)
+                : ungroupedSessions.length > 0 &&
                   e(
                     "div",
-                    {
-                      style: {
-                        padding: "10px 14px",
-                        backgroundColor: "var(--color-bg-base, rgba(255, 255, 255, 0.02))",
-                        fontWeight: 600,
-                        fontSize: "12px",
-                        color: "#a3a3a3",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
+                    { key: "ungrouped-section" },
+                    e(
+                      "div",
+                      {
+                        style: {
+                          padding: "10px 14px",
+                          backgroundColor: "var(--color-bg-base, rgba(255, 255, 255, 0.02))",
+                          fontWeight: 600,
+                          fontSize: "12px",
+                          color: "#a3a3a3",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        },
                       },
-                    },
-                    `Ungrouped Sessions (${ungroupedSessions.length})`
-                  ),
-                  ungroupedSessions.map(renderSessionRow)
-                )
+                      `Ungrouped Sessions (${ungroupedSessions.length})`
+                    ),
+                    ungroupedSessions.map(renderSessionRow)
+                  )
             )
       ),
 
@@ -1359,7 +1455,9 @@ window.__ModuleLoader__.load({
           order: 25, // Placed right below Agent presets (order 20)
           label: "Session Manager",
         },
-        (props) => e(SessionManagerSection, { ...props, ctx })
+        function SessionManagerSlot(props) {
+          return e(ErrorBoundary, null, e(SessionManagerSection, { ...props, ctx }));
+        }
       )
     );
 
@@ -1418,7 +1516,7 @@ window.__ModuleLoader__.load({
   }
 
   exports.name = "dsh-plugin-session-delete";
-  exports.inject = ["slots"];
+  exports.inject = ["slots", "sessions", "workspaces"];
   exports.apply = apply;
   return module.exports;
   }
