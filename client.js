@@ -141,6 +141,20 @@ window.__ModuleLoader__.load({
     const [renameModal, setRenameModal] = useState(null); // { type: 'session' | 'workspace', id, currentTitle }
     const [deleteModal, setDeleteModal] = useState(null); // { type: 'single' | 'bulk', ids: [], titles: [] }
 
+    const [fallbackSessions, setFallbackSessions] = useState([]);
+
+    // Fetch sessions directly from server endpoint
+    useEffect(() => {
+      fetch("/dsh-ext/sessions")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.ok && Array.isArray(data.sessions)) {
+            setFallbackSessions(data.sessions);
+          }
+        })
+        .catch(() => {});
+    }, [tick]);
+
     // Subscribe to sessions and workspaces changes
     useEffect(() => {
       const unsubs = [];
@@ -188,6 +202,14 @@ window.__ModuleLoader__.load({
       const ids = sessionsSnapshot.ids || [];
       const byId = sessionsSnapshot.byId || {};
 
+      if (ids.length === 0 && fallbackSessions.length > 0) {
+        return fallbackSessions.map((s) => ({
+          ...s,
+          isPinned: pinnedSet.has(s.id),
+          isArchived: archivedSet.has(s.id),
+        }));
+      }
+
       for (const id of ids) {
         const item = byId[id] || {};
         list.push({
@@ -202,7 +224,7 @@ window.__ModuleLoader__.load({
         });
       }
       return list;
-    }, [sessionsSnapshot, pinnedSet, archivedSet]);
+    }, [sessionsSnapshot, fallbackSessions, pinnedSet, archivedSet]);
 
     // Filter by search query
     const filteredSessions = useMemo(() => {

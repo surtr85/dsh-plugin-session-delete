@@ -252,6 +252,47 @@ export function apply(ctx) {
       },
     };
 
+    
+    // Sessions list endpoint
+    const listRoute = {
+      kind: "exact",
+      path: "/dsh-ext/sessions",
+      handler: async (req, res) => {
+        try {
+          const dshHome = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+          const projCacheDir = path.join(dshHome, "storages", "session_projcache", "sessions");
+          const sessions = [];
+
+          if (fsSync.existsSync(projCacheDir)) {
+            const files = await fs.readdir(projCacheDir);
+            for (const file of files) {
+              if (file.endsWith(".json")) {
+                try {
+                  const content = await fs.readFile(path.join(projCacheDir, file), "utf-8");
+                  const data = JSON.parse(content);
+                  sessions.push({
+                    id: file.replace(".json", ""),
+                    title: data.title || data.displayTitle || file.replace(".json", ""),
+                    displayTitle: data.displayTitle || data.title || file.replace(".json", ""),
+                    updatedAt: data.updatedAt || 0,
+                    cwd: data.cwd || "",
+                    running: false,
+                  });
+                } catch {}
+              }
+            }
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, sessions }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      },
+    };
+
+    webCtx.effect(() => webCtx.webServer.register(listRoute), "dsh-plugin-session-delete: /dsh-ext/sessions");
     webCtx.effect(() => webCtx.webServer.register(deleteRoute), "dsh-plugin-session-delete: /dsh-ext/session-delete");
     webCtx.effect(() => webCtx.webServer.register(bulkDeleteRoute), "dsh-plugin-session-delete: /dsh-ext/session-bulk-delete");
   });
